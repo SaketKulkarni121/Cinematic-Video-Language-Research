@@ -8,6 +8,7 @@ from app.models.shot import Shot
 from pydantic import BaseModel
 
 
+# Data models for video operations
 class VideoCreate(BaseModel):
     title: str
     src_url: str
@@ -28,11 +29,13 @@ router = APIRouter()
 
 @router.post("/", response_model=VideoResponse)
 async def create_video(video: VideoCreate, db: Session = Depends(get_db)):
+    """Create a new video and return it with shot count"""
     db_video = Video(title=video.title, src_url=video.src_url)
     db.add(db_video)
     db.commit()
     db.refresh(db_video)
     
+    # Count shots associated with this video
     shot_count = db.query(Shot).filter(Shot.video_id == db_video.id).count()
     
     return VideoResponse(
@@ -45,10 +48,12 @@ async def create_video(video: VideoCreate, db: Session = Depends(get_db)):
 
 @router.get("/{video_id}", response_model=VideoResponse)
 async def get_video(video_id: int, db: Session = Depends(get_db)):
+    """Get video details including shot count"""
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     
+    # Count shots associated with this video
     shot_count = db.query(Shot).filter(Shot.video_id == video_id).count()
     
     return VideoResponse(

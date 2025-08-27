@@ -1,3 +1,4 @@
+# Import and expose all database models for easy access
 from .base import Base
 from .video import Video
 from .shot import Shot

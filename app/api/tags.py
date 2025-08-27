@@ -9,6 +9,7 @@ from app.models.tag import Tag
 from pydantic import BaseModel
 
 
+# Data models for tag operations
 class TagCreate(BaseModel):
     slug: str
     name: str
@@ -38,11 +39,13 @@ async def list_tags(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(24, ge=1, le=60, description="Items per page")
 ):
+    """List tags with optional fuzzy search and pagination"""
     db = next(get_db())
     
     tag_query = db.query(Tag)
     
     if query:
+        # Apply fuzzy search using PostgreSQL similarity function
         tag_query = tag_query.filter(
             func.similarity(Tag.name, query) >= threshold
         ).order_by(func.similarity(Tag.name, query).desc())
@@ -61,6 +64,8 @@ async def list_tags(
 
 @router.post("/", response_model=TagResponse)
 async def create_tag(tag: TagCreate, db: Session = Depends(get_db)):
+    """Create a new tag"""
+    # Check for duplicate slug
     existing = db.query(Tag).filter(Tag.slug == tag.slug).first()
     if existing:
         raise HTTPException(status_code=400, detail="Tag with this slug already exists")
@@ -75,16 +80,19 @@ async def create_tag(tag: TagCreate, db: Session = Depends(get_db)):
 
 @router.put("/{tag_id}", response_model=TagResponse)
 async def update_tag(tag_id: int, tag_update: TagUpdate, db: Session = Depends(get_db)):
+    """Update an existing tag"""
     db_tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not db_tag:
         raise HTTPException(status_code=404, detail="Tag not found")
     
+    # Update slug if provided, checking for conflicts
     if tag_update.slug is not None:
         existing = db.query(Tag).filter(Tag.slug == tag_update.slug, Tag.id != tag_id).first()
         if existing:
             raise HTTPException(status_code=400, detail="Tag with this slug already exists")
         db_tag.slug = tag_update.slug
     
+    # Update name if provided
     if tag_update.name is not None:
         db_tag.name = tag_update.name
     

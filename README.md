@@ -1,44 +1,55 @@
-# CVLR Backend (FastAPI + Postgres + pgvector)
+# CVLR Backend - Video Analysis Research Platform
 
-Minimal backend for a Shotdeck-style app with:
+This project implements a backend system for analyzing and organizing video content at the shot level, designed to support research in cinematic video language understanding. The system provides tools for video segmentation, semantic tagging, and similarity search using both traditional database techniques and vector embeddings.
 
-- Shot-level data model
-- Fuzzy tag search (name + slug) using pg_trgm
-- Optional vector search on shots.embedding via pgvector
-- Decks for saving shots
-- Clean seams to add comments and search logs later
+## Project Overview
 
-## Stack
+The platform enables researchers to:
+- Upload and segment videos into individual shots
+- Apply descriptive tags to shots for categorization
+- Organize shots into collections called "decks"
+- Perform similarity search using both tag-based and vector-based methods
+- Build datasets for video analysis research
 
-- **FastAPI** • **SQLAlchemy 2.x** • **Alembic**
-- **PostgreSQL 16** • **pgvector** • **pg_trgm**
-- **Python 3.11**
+## Technology Stack
 
-## Quick Start
+**Core Framework:**
+- FastAPI for the web API
+- SQLAlchemy 2.x for database operations
+- Alembic for database migrations
+
+**Database:**
+- PostgreSQL 16 with pgvector extension for vector storage
+- pg_trgm extension for fuzzy text search
+
+**Language:** Python 3.11
+
+## Getting Started
 
 ```bash
+# Set up environment and start database
 cp env.example .env
 docker compose up -d
 
+# Create Python environment and install dependencies
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
+# Initialize database schema
 alembic upgrade head
 
-# optional: seed demo rows
+# Optional: populate with sample data
 python -m scripts.seed
 
-# run api
+# Start the API server
 uvicorn app.main:app --reload
 ```
 
-Health check:
+Test the system by calling `GET /health` - it should return `{ "ok": true }`.
 
-```
-GET /health -> { "ok": true }
-```
+## Database Design
 
-## Schema (MVP-lite)
+The schema is designed to be simple yet extensible for research applications:
 
 ```
 videos
@@ -47,17 +58,17 @@ videos
 shots
   id PK, video_id FK -> videos.id
   t_start_ms, t_end_ms, thumb_url
-  embedding VECTOR(768) NULL
+  embedding VECTOR(768) NULL  # Vector representation for similarity search
   created_at
   IDX (video_id, t_start_ms)
   IVFFlat(embedding vector_cosine_ops) WITH (lists=150)
 
 tags
   id PK, slug UNIQUE, name
-  GIN(name gin_trgm_ops), GIN(slug gin_trgm_ops)
+  GIN(name gin_trgm_ops), GIN(slug gin_trgm_ops)  # Fuzzy search support
 
 shot_tags
-  PK (shot_id, tag_id)
+  PK (shot_id, tag_id)  # Many-to-many relationship
   FK shot_id -> shots.id
   FK tag_id -> tags.id
   IDX (shot_id), (tag_id)
@@ -73,133 +84,116 @@ deck_items
   IDX (deck_id, sort_order)
 ```
 
-Future tables (not included yet): `comments`, `search_logs`.
+Future additions will include `comments` and `search_logs` tables for research data collection.
 
-## Search
+## Search Capabilities
 
-### Fuzzy Tag Search
+### Tag-Based Search
 
-Endpoint: `GET /tags?query=...&threshold=0.2&page=1&page_size=24`
+Uses PostgreSQL's trigram similarity for fuzzy matching on tag names and slugs. This allows researchers to find content even with approximate search terms.
 
-Uses trigram similarity on name and slug; sorts by max similarity.
+- `GET /tags?query=...&threshold=0.2&page=1&page_size=24`
+- `GET /shots?tag_query=...` finds shots with similar tags
 
-`GET /shots?tag_query=...` returns shots having any tag whose similarity ≥ threshold.
+The threshold parameter controls search precision - lower values require more exact matches.
 
-### Vector Recall (Optional)
+### Vector Similarity Search
 
-Endpoint: `GET /shots?q=...&top_k=200`
+Enables semantic search by converting text queries to vector representations and finding similar shots.
 
-Text is embedded to a vector (pluggable). Default mock embedder if `EMBEDDER=mock`.
+- `GET /shots?q=...&top_k=200` performs vector similarity search
 
-ANN query: `ORDER BY embedding <-> :query_vec LIMIT :top_k`.
+Currently uses a mock embedder for development. The database structure is ready for integration with models like CLIP or other embedding systems.
 
-If tags also provided:
-
-- `hybrid=true` (default): intersect ANN candidates with tag matches.
-- `hybrid=false`: union and de-dup.
+The `hybrid=true` option combines vector similarity with tag matching. This approach may be useful for research applications where both semantic and categorical information are relevant.
 
 ### Pagination
 
-`page` (default 1), `page_size` (default 24, max 60).
+Standard pagination with `page` and `page_size` parameters for handling large result sets.
 
-## API Overview
+## API Structure
 
-### Shots & Search
+The API follows REST conventions with endpoints organized by resource type:
 
-- `GET /shots`
-  - Params: `q`, `top_k`, `tag_slugs[]`, `tag_query`, `threshold`, `hybrid`, `page`, `page_size`
-
-- `GET /shots/{id}`
-  - Returns shot + video + tags + "more like this" if embedding present.
+### Shots and Search
+- `GET /shots` - Main search endpoint with comprehensive parameters
+- `GET /shots/{id}` - Retrieve specific shot with related metadata
 
 ### Tags
-
-- `GET /tags`
-  - Params: `query`, `threshold`, `page`, `page_size`
-
-- `POST /tags`
-  - Body: `{ "slug": "...", "name": "..." }`
-
-- `PUT /tags/{id}`
-  - Body: `{ "slug": "...?", "name": "...?" }`
+- `GET /tags` - Search and browse tags
+- `POST /tags` - Create new tags
+- `PUT /tags/{id}` - Update existing tags
 
 ### Decks
-
-- `GET /decks?user_id=...`
-
-- `POST /decks`
-  - Body: `{ "user_id": 1, "title": "My Deck" }`
-
-- `POST /decks/{deck_id}/items`
-  - Body: `{ "shot_id": 123, "sort_order": 10 }`
-
-- `DELETE /decks/{deck_id}/items/{shot_id}`
-
-- `PUT /decks/{deck_id}/items/reorder`
-  - Body: `[ { "shot_id": 1, "sort_order": 0 }, ... ]`
+- `GET /decks?user_id=...` - Retrieve user's collections
+- `POST /decks` - Create new collection
+- `POST /decks/{deck_id}/items` - Add shot to collection
+- `DELETE /decks/{deck_id}/items/{shot_id}` - Remove shot from collection
+- `PUT /decks/{deck_id}/items/reorder` - Reorder shots in collection
 
 ### Videos
+- `POST /videos` - Upload new video content
+- `GET /videos/{id}` - Retrieve video information
 
-- `POST /videos`
-  - Body: `{ "title": "...", "src_url": "..." }`
+## Database Configuration
 
-- `GET /videos/{id}`
-
-### Health
-
-- `GET /health`
-
-## Indices & Extensions
-
-Enable extensions in the initial migration:
+Required PostgreSQL extensions:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS vector;      -- Vector storage and similarity
+CREATE EXTENSION IF NOT EXISTS pg_trgm;     -- Fuzzy text search
 ```
 
-Create indices:
+Performance indices:
 
 ```sql
--- Ann index for embeddings (adjust lists as data grows)
+-- Vector similarity search
 CREATE INDEX IF NOT EXISTS shot_embedding_ivfflat
 ON shots USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 150);
 
--- Fuzzy search on tag name and slug
+-- Fuzzy search on tags
 CREATE INDEX IF NOT EXISTS tag_name_trgm ON tags USING gin (name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS tag_slug_trgm ON tags USING gin (slug gin_trgm_ops);
 
--- Common filters
+-- Query optimization
 CREATE INDEX IF NOT EXISTS idx_shots_video_time ON shots (video_id, t_start_ms);
 CREATE INDEX IF NOT EXISTS idx_shot_tags_shot ON shot_tags (shot_id);
 CREATE INDEX IF NOT EXISTS idx_shot_tags_tag  ON shot_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_deck_items_order ON deck_items (deck_id, sort_order);
 ```
 
-## Configuration
+## Environment Configuration
 
-`.env`:
-
+The `.env` file requires:
 ```
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/shotdb
-EMBEDDER=mock  # optional: enables mock text embeddings for dev
+EMBEDDER=mock  # Will be replaced with actual embedding model
 ```
 
-`docker-compose.yml`: Postgres 16 with pgvector, healthcheck, port 5432.
+## Sample Data
 
-## Seeding
+The seeding script (`python -m scripts.seed`) creates:
+- Sample video content
+- Multiple shots with timing information
+- Various tags and relationships
+- Example deck with organized shots
 
-`python -m scripts.seed` inserts:
+## Development Roadmap
 
-- one demo video
-- a few shots (no real embeddings)
-- a few tags and shot_tag links
-- one deck with deck_items
+Planned improvements include:
+- Integration with production embedding models
+- User authentication and authorization
+- Comment and search logging systems
+- Performance optimization with caching
+- Vector search parameter tuning
 
-## Scaling Later
+## Research Considerations
 
-- Add `comments` and `search_logs` tables with FK to shots and users.
-- Add Redis cache for hot queries, small TTL.
-- Increase IVFFlat lists as corpus grows; `ANALYZE shots` after bulk ingest.
-- Swap mock embedder for CLIP or other model.
+Several design decisions warrant further investigation:
+- Effectiveness of hybrid search combining vector and tag similarity
+- Optimal vector similarity metrics for video content
+- Index type selection (IVFFlat vs HNSW) for different scales
+- Handling of shots without vector representations
+
+This system provides a foundation for video analysis research while maintaining flexibility for future enhancements and research directions.

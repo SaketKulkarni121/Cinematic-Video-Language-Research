@@ -11,6 +11,7 @@ from app.models.tag import Tag, ShotTag
 from pydantic import BaseModel
 
 
+# Data models for creating and responding to deck operations
 class DeckCreate(BaseModel):
     user_id: int
     title: str
@@ -60,12 +61,14 @@ router = APIRouter()
 
 @router.get("/", response_model=List[DeckResponse])
 async def list_decks(user_id: int, db: Session = Depends(get_db)):
+    """Get all decks for a specific user"""
     decks = db.query(Deck).filter(Deck.user_id == user_id).all()
     return [DeckResponse.from_orm(deck) for deck in decks]
 
 
 @router.post("/", response_model=DeckResponse)
 async def create_deck(deck: DeckCreate, db: Session = Depends(get_db)):
+    """Create a new deck for a user"""
     db_deck = Deck(user_id=deck.user_id, title=deck.title)
     db.add(db_deck)
     db.commit()
@@ -76,12 +79,15 @@ async def create_deck(deck: DeckCreate, db: Session = Depends(get_db)):
 
 @router.get("/{deck_id}", response_model=DeckDetailResponse)
 async def get_deck(deck_id: int, db: Session = Depends(get_db)):
+    """Get detailed information about a specific deck including all its shots"""
     deck = db.query(Deck).filter(Deck.id == deck_id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
     
+    # Get all deck items ordered by sort order
     items = db.query(DeckItem).filter(DeckItem.deck_id == deck_id).order_by(DeckItem.sort_order).all()
     
+    # Build detailed responses for each deck item
     item_responses = []
     for item in items:
         shot = db.query(Shot).filter(Shot.id == item.shot_id).first()
@@ -107,6 +113,7 @@ async def get_deck(deck_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{deck_id}/items", response_model=DeckItemResponse)
 async def add_deck_item(deck_id: int, item: DeckItemCreate, db: Session = Depends(get_db)):
+    """Add a shot to a deck"""
     deck = db.query(Deck).filter(Deck.id == deck_id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
@@ -115,12 +122,14 @@ async def add_deck_item(deck_id: int, item: DeckItemCreate, db: Session = Depend
     if not shot:
         raise HTTPException(status_code=404, detail="Shot not found")
     
+    # Check if shot is already in the deck
     existing = db.query(DeckItem).filter(
         DeckItem.deck_id == deck_id, DeckItem.shot_id == item.shot_id
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Shot already in deck")
     
+    # Auto-assign sort order if not provided
     if item.sort_order is None:
         max_order = db.query(DeckItem).filter(DeckItem.deck_id == deck_id).with_entities(
             func.max(DeckItem.sort_order)
@@ -131,6 +140,7 @@ async def add_deck_item(deck_id: int, item: DeckItemCreate, db: Session = Depend
     db.add(db_item)
     db.commit()
     
+    # Return the created item with full details
     video = db.query(Video).filter(Video.id == shot.video_id).first()
     tags = db.query(Tag).join(ShotTag).filter(ShotTag.shot_id == shot.id).all()
     
@@ -145,6 +155,7 @@ async def add_deck_item(deck_id: int, item: DeckItemCreate, db: Session = Depend
 
 @router.delete("/{deck_id}/items/{shot_id}")
 async def remove_deck_item(deck_id: int, shot_id: int, db: Session = Depends(get_db)):
+    """Remove a shot from a deck"""
     item = db.query(DeckItem).filter(
         DeckItem.deck_id == deck_id, DeckItem.shot_id == shot_id
     ).first()
@@ -160,10 +171,12 @@ async def remove_deck_item(deck_id: int, shot_id: int, db: Session = Depends(get
 
 @router.put("/{deck_id}/items/reorder")
 async def reorder_deck_items(deck_id: int, request: ReorderRequest, db: Session = Depends(get_db)):
+    """Reorder shots within a deck by updating their sort orders"""
     deck = db.query(Deck).filter(Deck.id == deck_id).first()
     if not deck:
         raise HTTPException(status_code=404, detail="Deck not found")
     
+    # Update sort order for each item in the request
     for item_data in request.items:
         shot_id = item_data.get("shot_id")
         sort_order = item_data.get("sort_order")

@@ -12,6 +12,8 @@ class Embedder(ABC):
 
 class MockEmbedder(Embedder):
     def embed(self, text: str) -> Optional[List[float]]:
+        # TODO: Implement actual embedding logic
+        # Didn't want to use a real embedder for now
         if os.getenv("EMBEDDER") == "mock":
             return list(np.random.normal(0, 1, 768))
         return None

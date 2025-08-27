@@ -12,6 +12,7 @@ from app.search.queries import build_shot_query, build_vector_query, get_similar
 from pydantic import BaseModel
 
 
+# Data models for shot responses
 class ShotResponse(BaseModel):
     id: int
     video_id: int
@@ -54,9 +55,11 @@ async def list_shots(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(24, ge=1, le=60, description="Items per page")
 ):
+    """List shots with optional vector search, tag filtering, and pagination"""
     db = next(get_db())
     
     if q:
+        # Perform vector search when text query is provided
         embedder = get_embedder()
         query_vector = embedder.embed(q)
         
@@ -83,12 +86,13 @@ async def list_shots(
             shots = []
             total = 0
     else:
+        # Use traditional database query when no vector search
         query, total = build_shot_query(
             db, tag_slugs, tag_query, threshold, page, page_size
         )
         shots = query.all()
     
-    # Get video and tag info for each shot
+    # Build response objects with video and tag information
     shot_responses = []
     for shot in shots:
         video = db.query(Video).filter(Video.id == shot.video_id).first()
@@ -115,13 +119,16 @@ async def list_shots(
 
 @router.get("/{shot_id}", response_model=ShotDetailResponse)
 async def get_shot(shot_id: int, db: Session = Depends(get_db)):
+    """Get detailed information about a specific shot including similar shots"""
     shot = db.query(Shot).filter(Shot.id == shot_id).first()
     if not shot:
         raise HTTPException(status_code=404, detail="Shot not found")
     
+    # Get video and tag information for the shot
     video = db.query(Video).filter(Video.id == shot.video_id).first()
     tags = db.query(Tag).join(ShotTag).filter(ShotTag.shot_id == shot.id).all()
     
+    # Find similar shots using vector similarity if embedding exists
     similar_shots = []
     if shot.embedding:
         similar_shots_data = get_similar_shots(db, shot_id, 5)
